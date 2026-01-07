@@ -28,19 +28,34 @@ function detectProvider(email) {
   return null;
 }
 
-// Create IMAP client
-async function createClient(email, password, provider) {
+// Create IMAP client (supports both password and OAuth)
+async function createClient(email, password, provider, options = {}) {
   const config = IMAP_CONFIGS[provider];
   if (!config) throw new Error(`Unsupported provider: ${provider}`);
+
+  let authConfig;
+
+  // Check if using OAuth authentication
+  if (options.authType === 'oauth' && options.accessToken) {
+    // Use XOAUTH2 for Gmail OAuth
+    authConfig = {
+      user: email,
+      accessToken: options.accessToken,
+    };
+    console.log(`Using OAuth authentication for ${email}`);
+  } else {
+    // Use regular password authentication
+    authConfig = {
+      user: email,
+      pass: password,
+    };
+  }
 
   const client = new ImapFlow({
     host: config.host,
     port: config.port,
     secure: config.secure,
-    auth: {
-      user: email,
-      pass: password,
-    },
+    auth: authConfig,
     logger: false,
   });
 
@@ -55,10 +70,10 @@ app.get('/', (req, res) => {
 
 // Test connection
 app.post('/test', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, authType, accessToken } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+  if (!email || (!password && !accessToken)) {
+    return res.status(400).json({ error: 'Email and password/accessToken required' });
   }
 
   const provider = detectProvider(email);
@@ -68,9 +83,9 @@ app.post('/test', async (req, res) => {
 
   let client;
   try {
-    client = await createClient(email, password, provider);
+    client = await createClient(email, password, provider, { authType, accessToken });
     await client.logout();
-    res.json({ success: true, provider });
+    res.json({ success: true, provider, authType: authType || 'password' });
   } catch (error) {
     console.error('Connection test failed:', error.message);
     res.status(401).json({
@@ -82,10 +97,10 @@ app.post('/test', async (req, res) => {
 
 // Get email count
 app.post('/count', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, authType, accessToken } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+  if (!email || (!password && !accessToken)) {
+    return res.status(400).json({ error: 'Email and password/accessToken required' });
   }
 
   const provider = detectProvider(email);
@@ -95,7 +110,7 @@ app.post('/count', async (req, res) => {
 
   let client;
   try {
-    client = await createClient(email, password, provider);
+    client = await createClient(email, password, provider, { authType, accessToken });
     await client.mailboxOpen('INBOX');
 
     const status = await client.status('INBOX', { messages: true });
@@ -110,10 +125,10 @@ app.post('/count', async (req, res) => {
 
 // Fetch emails
 app.post('/fetch', async (req, res) => {
-  const { email, password, limit = 50, offset = 0, folder = 'INBOX' } = req.body;
+  const { email, password, limit = 50, offset = 0, folder = 'INBOX', authType, accessToken } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+  if (!email || (!password && !accessToken)) {
+    return res.status(400).json({ error: 'Email and password/accessToken required' });
   }
 
   const provider = detectProvider(email);
@@ -123,7 +138,7 @@ app.post('/fetch', async (req, res) => {
 
   let client;
   try {
-    client = await createClient(email, password, provider);
+    client = await createClient(email, password, provider, { authType, accessToken });
     await client.mailboxOpen(folder);
 
     const status = await client.status(folder, { messages: true });
@@ -197,10 +212,10 @@ app.post('/fetch', async (req, res) => {
 // Get single email by UID
 app.post('/message/:uid', async (req, res) => {
   const { uid } = req.params;
-  const { email, password, folder = 'INBOX' } = req.body;
+  const { email, password, folder = 'INBOX', authType, accessToken } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+  if (!email || (!password && !accessToken)) {
+    return res.status(400).json({ error: 'Email and password/accessToken required' });
   }
 
   const provider = detectProvider(email);
@@ -210,7 +225,7 @@ app.post('/message/:uid', async (req, res) => {
 
   let client;
   try {
-    client = await createClient(email, password, provider);
+    client = await createClient(email, password, provider, { authType, accessToken });
     await client.mailboxOpen(folder);
 
     const message = await client.fetchOne(uid, {
@@ -258,10 +273,10 @@ app.post('/message/:uid', async (req, res) => {
 
 // Search emails
 app.post('/search', async (req, res) => {
-  const { email, password, query, folder = 'INBOX', limit = 50 } = req.body;
+  const { email, password, query, folder = 'INBOX', limit = 50, authType, accessToken } = req.body;
 
-  if (!email || !password || !query) {
-    return res.status(400).json({ error: 'Email, password, and query required' });
+  if (!email || (!password && !accessToken) || !query) {
+    return res.status(400).json({ error: 'Email, password/accessToken, and query required' });
   }
 
   const provider = detectProvider(email);
@@ -271,7 +286,7 @@ app.post('/search', async (req, res) => {
 
   let client;
   try {
-    client = await createClient(email, password, provider);
+    client = await createClient(email, password, provider, { authType, accessToken });
     await client.mailboxOpen(folder);
 
     // Search for messages containing the query in subject or body
