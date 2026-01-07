@@ -28,6 +28,12 @@ function detectProvider(email) {
   return null;
 }
 
+// Get default folder for provider (All Mail for Gmail, INBOX for others)
+function getDefaultFolder(provider) {
+  if (provider === 'gmail') return '[Gmail]/All Mail';
+  return 'INBOX';
+}
+
 // Create IMAP client (supports both password and OAuth)
 async function createClient(email, password, provider, options = {}) {
   const config = IMAP_CONFIGS[provider];
@@ -108,12 +114,14 @@ app.post('/count', async (req, res) => {
     return res.status(400).json({ error: 'Unsupported email provider' });
   }
 
+  const folder = getDefaultFolder(provider);
+
   let client;
   try {
     client = await createClient(email, password, provider, { authType, accessToken });
-    await client.mailboxOpen('INBOX');
+    await client.mailboxOpen(folder);
 
-    const status = await client.status('INBOX', { messages: true });
+    const status = await client.status(folder, { messages: true });
     await client.logout();
 
     res.json({ count: status.messages || 0 });
@@ -125,7 +133,7 @@ app.post('/count', async (req, res) => {
 
 // Fetch emails
 app.post('/fetch', async (req, res) => {
-  const { email, password, limit = 50, offset = 0, folder = 'INBOX', authType, accessToken } = req.body;
+  const { email, password, limit = 50, offset = 0, folder, authType, accessToken } = req.body;
 
   if (!email || (!password && !accessToken)) {
     return res.status(400).json({ error: 'Email and password/accessToken required' });
@@ -136,12 +144,14 @@ app.post('/fetch', async (req, res) => {
     return res.status(400).json({ error: 'Unsupported email provider' });
   }
 
+  const targetFolder = folder || getDefaultFolder(provider);
+
   let client;
   try {
     client = await createClient(email, password, provider, { authType, accessToken });
-    await client.mailboxOpen(folder);
+    await client.mailboxOpen(targetFolder);
 
-    const status = await client.status(folder, { messages: true });
+    const status = await client.status(targetFolder, { messages: true });
     const totalCount = status.messages || 0;
 
     if (totalCount === 0) {
@@ -212,7 +222,7 @@ app.post('/fetch', async (req, res) => {
 // Get single email by UID
 app.post('/message/:uid', async (req, res) => {
   const { uid } = req.params;
-  const { email, password, folder = 'INBOX', authType, accessToken } = req.body;
+  const { email, password, folder, authType, accessToken } = req.body;
 
   if (!email || (!password && !accessToken)) {
     return res.status(400).json({ error: 'Email and password/accessToken required' });
@@ -223,10 +233,12 @@ app.post('/message/:uid', async (req, res) => {
     return res.status(400).json({ error: 'Unsupported email provider' });
   }
 
+  const targetFolder = folder || getDefaultFolder(provider);
+
   let client;
   try {
     client = await createClient(email, password, provider, { authType, accessToken });
-    await client.mailboxOpen(folder);
+    await client.mailboxOpen(targetFolder);
 
     const message = await client.fetchOne(uid, {
       envelope: true,
@@ -273,7 +285,7 @@ app.post('/message/:uid', async (req, res) => {
 
 // Search emails
 app.post('/search', async (req, res) => {
-  const { email, password, query, folder = 'INBOX', limit = 50, authType, accessToken } = req.body;
+  const { email, password, query, folder, limit = 50, authType, accessToken } = req.body;
 
   if (!email || (!password && !accessToken) || !query) {
     return res.status(400).json({ error: 'Email, password/accessToken, and query required' });
@@ -284,10 +296,12 @@ app.post('/search', async (req, res) => {
     return res.status(400).json({ error: 'Unsupported email provider' });
   }
 
+  const targetFolder = folder || getDefaultFolder(provider);
+
   let client;
   try {
     client = await createClient(email, password, provider, { authType, accessToken });
-    await client.mailboxOpen(folder);
+    await client.mailboxOpen(targetFolder);
 
     // Search for messages containing the query in subject or body
     const uids = await client.search({
